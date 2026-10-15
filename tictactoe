@@ -1,0 +1,182 @@
+import random
+import numpy as np
+
+# --- 1. Define the game board and state management ---
+class TicTacToe:
+    def __init__(self):
+        self.board = [' '] * 9
+        self.current_winner = None
+
+    def print_board(self):
+        for row in [self.board[i*3:(i+1)*3] for i in range(3)]:
+            print('| ' + ' | '.join(row) + ' |')
+
+    def available_moves(self):
+        return [i for i, spot in enumerate(self.board) if spot == ' ']
+
+    def empty_squares(self):
+        return ' ' in self.board
+
+    def num_empty_squares(self):
+        return self.board.count(' ')
+
+    def make_move(self, square, letter):
+        if self.board[square] == ' ':
+            self.board[square] = letter
+            if self.check_winner(square, letter):
+                self.current_winner = letter
+            return True
+        return False
+
+    def check_winner(self, square, letter):
+        # Check row
+        row_ind = square // 3
+        row = self.board[row_ind*3 : (row_ind+1)*3]
+        if all([spot == letter for spot in row]):
+            return True
+        # Check column
+        col_ind = square % 3
+        column = [self.board[col_ind+i*3] for i in range(3)]
+        if all([spot == letter for spot in column]):
+            return True
+        # Check diagonals
+        if square % 2 == 0:
+            diagonal1 = [self.board[i] for i in [0, 4, 8]]
+            if all([spot == letter for spot in diagonal1]):
+                return True
+            diagonal2 = [self.board[i] for i in [2, 4, 6]]
+            if all([spot == letter for spot in diagonal2]):
+                return True
+        return False
+
+    def get_state(self):
+        return "".join(self.board)
+
+# --- 2. Define the Q-learning AI Agent ---
+class QLearningAgent:
+    def __init__(self, alpha=0.5, epsilon=0.3, gamma=0.9):
+        self.q_table = {}  # maps state_string -> array of 9 Q-values
+        self.alpha = alpha  # learning rate
+        self.epsilon = epsilon  # exploration rate
+        self.gamma = gamma  # discount factor
+
+    def get_q_values(self, state):
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(9)
+        return self.q_table[state]
+
+    def choose_action(self, state, available_moves):
+        if random.uniform(0, 1) < self.epsilon:
+            # Explore: random move
+            return random.choice(available_moves)
+        else:
+            # Exploit: best move according to Q-table
+            q_values = self.get_q_values(state)
+            # Filter out unavailable moves by setting their Q-values to -infinity
+            masked_q = np.array([q_values[i] if i in available_moves else -np.inf for i in range(9)])
+            return np.argmax(masked_q)
+
+    def update_q_value(self, state, action, reward, next_state, next_available_moves):
+        old_q = self.get_q_values(state)[action]
+        if not next_available_moves: # Terminal state
+            max_future_q = 0
+        else:
+            next_q_values = self.get_q_values(next_state)
+            max_future_q = max([next_q_values[i] for i in next_available_moves])
+        
+        # Q-learning formula
+        new_q = old_q + self.alpha * (reward + self.gamma * max_future_q - old_q)
+        self.q_table[state][action] = new_q
+
+# --- 3. Training Loop ---
+def train_agent(episodes=10000):
+    agent = QLearningAgent()
+    for episode in range(episodes):
+        game = TicTacToe()
+        state = game.get_state()
+        
+        # Agent plays as 'X', opponent makes random moves as 'O'
+        while game.empty_squares():
+            # Agent's turn
+            available = game.available_moves()
+            action = agent.choose_action(state, available)
+            game.make_move(action, 'X')
+            next_state = game.get_state()
+            
+            if game.current_winner == 'X':
+                # Agent wins
+                agent.update_q_value(state, action, 1, next_state, [])
+                break
+            elif not game.empty_squares():
+                # Tie
+                agent.update_q_value(state, action, 0.5, next_state, [])
+                break
+            
+            # Opponent's ('O') turn
+            opp_available = game.available_moves()
+            opp_move = random.choice(opp_available)
+            game.make_move(opp_move, 'O')
+            
+            if game.current_winner == 'O':
+                # Agent loses
+                agent.update_q_value(state, action, -1, game.get_state(), [])
+                break
+            elif not game.empty_squares():
+                # Tie
+                agent.update_q_value(state, action, 0.5, game.get_state(), [])
+                break
+            
+            # If game continues, update Q-value with intermediate reward of 0
+            next_available = game.available_moves()
+            agent.update_q_value(state, action, 0, game.get_state(), next_available)
+            state = game.get_state()
+            
+    return agent
+
+# --- 4. Main Game Loop (Play with Trained AI) ---
+def play_game(agent):
+    game = TicTacToe()
+    # Turn off exploration for evaluation
+    agent.epsilon = 0.0
+    
+    print("\n--- Start New Game ---")
+    print("Positions are numbered 0 to 8:")
+    print("| 0 | 1 | 2 |\n| 3 | 4 | 5 |\n| 6 | 7 | 8 |")
+    print("You are 'O' (Player). AI is 'X'.\n")
+    
+    # Randomly decide who goes first
+    turn = 'O' if random.choice([True, False]) else 'X'
+    print(f"{turn} goes first!")
+    
+    while game.empty_squares() and not game.current_winner:
+        game.print_board()
+        print()
+        if turn == 'O':
+            # Human turn
+            move = None
+            while move not in game.available_moves():
+                try:
+                    move = int(input("Enter your move (0-8): "))
+                except ValueError:
+                    pass
+            game.make_move(move, 'O')
+            turn = 'X'
+        else:
+            # AI turn
+            print("AI is thinking...")
+            state = game.get_state()
+            move = agent.choose_action(state, game.available_moves())
+            game.make_move(move, 'X')
+            turn = 'O'
+            
+    game.print_board()
+    if game.current_winner:
+        print(f"\nGame Over! Winner is: {game.current_winner}")
+    else:
+        print("\nGame Over! It's a tie.")
+
+# --- 5. Run the Simulation ---
+print("Training the AI agent... Please wait.")
+trained_agent = train_agent(episodes=20000)
+print("Training completed! Now, let's play.")
+play_game(trained_agent)
